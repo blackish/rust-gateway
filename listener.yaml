@@ -1,0 +1,75 @@
+listeners:
+- name: listener1
+  preprocessors: []
+    # - name: tls
+    #   config: testcert
+  listen: 127.0.0.1:8003
+  protocols:
+  - name: default
+    engine: http
+    sni:
+    - .*ample.com
+    virtual_hosts:
+    - name: host1
+      host_names:
+      - example.com
+      routes:
+      - name: default
+        path_matches:
+        - name: default
+          path_prefix:
+          - "/start"
+        # - name: headers
+        #   header:
+        #     -
+        #       header_name: cookie1
+        #       header_regex: .*
+        actions:
+        - backend: default
+- name: listener2
+  preprocessors:
+    - name: tls
+      config: testcert
+  listen: 127.0.0.1:8002
+  protocols:
+  - name: default
+    engine: http
+    sni:
+    - .*ample.com
+    virtual_hosts:
+    - name: host1
+      host_names:
+      - .*ample.com:.*
+      routes:
+      - name: default
+        path_matches:
+        - name: default
+          path_prefix:
+          - "/start"
+        # - name: headers
+        #   header:
+        #     -
+        #       header_name: cookie1
+        #       header_regex: .*
+        actions:
+        - backend: default
+clusters:
+- name: default
+  buffer: 1000000
+  lb_method: ROUNDROBIN
+  keepalive:
+    common:
+      config:
+        interval: 10
+        dead_interval: 3
+        live_interval: 5
+    tcp:
+      config: {}
+  members:
+  - socket_address: 31.177.80.70:80
+    status: active
+    weight: 1
+
+tls:
+  - name: testcert
+    file: ./test.pem
