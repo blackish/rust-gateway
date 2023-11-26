@@ -2,6 +2,8 @@ use log::debug;
 use std::{net::SocketAddr, io};
 use std::sync::Arc;
 use std::collections::HashMap;
+use rustls;
+use tokio_rustls::TlsConnector;
 use tokio::time::{Duration, sleep};
 use tokio::net::TcpStream;
 use tokio::task::JoinHandle;
@@ -97,6 +99,7 @@ pub async fn run_member(
                                 ).await
                             }).await;
                     } else {
+                        debug!("Failed to connect to backend");
                         let _ = client_receiver.send(message::ListenerConnection::NoAvailableMember);
                     }
                 },

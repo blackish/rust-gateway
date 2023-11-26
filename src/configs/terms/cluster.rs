@@ -6,6 +6,8 @@ pub const ICMP: &str = "icmp";
 pub const TCP: &str = "tcp";
 pub const HTTP: &str = "http";
 pub const MEMBERS: &str = "members";
+pub const TLS: &str = "tls";
+pub const SNI: &str = "sni";
 
 // common config terms
 pub const INTERVAL: &str = "interval";

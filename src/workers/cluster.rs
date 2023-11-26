@@ -44,10 +44,15 @@ pub async fn work(
                             }
                             for member in members.clone().keys() {
                                 if !member_list.contains(member) {
-                                    let _ = members.remove(member)
-                                            .unwrap()
-                                            .send(message::ClusterMessage::ConfigUpdate(message::ConfigUpdate::RemoveCluster(config.name.clone())))
-                                            .await;
+                                    let _ = members
+                                                .remove(member)
+                                                .unwrap()
+                                                .send(
+                                                    message::ClusterMessage::ConfigUpdate(
+                                                        message::ConfigUpdate::RemoveCluster(config.name.clone())
+                                                    )
+                                                )
+                                                .await;
                                 }
                             }
                         },
@@ -131,10 +136,24 @@ async fn add_member(
     member: &cluster::ClusterMemberConfig
 ) {
     debug!("Cluster: {:?}: adding member {:?}", cluster_config.name, member.address);
-    let new_member = clustermember::Member::new(cluster_config.name.clone(), member.address.clone(), cluster_config.keepalive.clone());
+    let new_member = clustermember::Member::new(
+        cluster_config.name.clone(),
+        member.address.clone(),
+        cluster_config.keepalive.clone()
+    );
     let (tx, rx) = channel(1);
     let _ = member_list.insert(member.address.to_string().into(), tx);
-    status_list.write().await.insert(member.address.to_string().as_str().into(), member.status.clone());
+    status_list
+        .write()
+        .await
+        .insert(
+            member
+                .address
+                .to_string()
+                .as_str()
+                .into(),
+            member.status.clone()
+        );
     let new_statuses = status_list.clone();
     tokio::spawn(async move {
         clustermember::run_member(new_member, new_statuses, rx).await

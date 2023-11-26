@@ -50,7 +50,7 @@ impl BufferManager {
                             },
                             message::BufferRequest::RequestCluster(name, size) => {
                                 debug!("Got buffer request for cluster: {:?}", name);
-                                let mut new_buffer = message::BufferResponseMessage::OverLimit;
+                                let mut new_buffer: message::BufferResponseMessage;
                                 let limit = clusters.get(&name).unwrap_or(&0);
                                     new_buffer = message::BufferResponseMessage::Buffer(buffer::StrictBuffer::new(size));
                                 allocated_clusters.entry(name).and_modify(|entry| {

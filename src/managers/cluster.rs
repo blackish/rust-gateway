@@ -55,13 +55,15 @@ impl ClusterManager {
                         let _ = sender.send(update).await;
                     }
                 },
-                message::ClusterMessage::ClusterConnection(ref cluster, _, _, _) => {
-                    if let Some(sender) = self.clusters.get(cluster) {
-                        let _ = sender.send(update).await;
+                message::ClusterMessage::ClusterConnection(cluster, route, buffer, sender_tx) => {
+                    if let Some(sender) = self.clusters.get(&cluster) {
+                        let _ = sender
+                                .send(message::ClusterMessage::ClusterConnection(cluster, route, buffer, sender_tx))
+                                .await;
+                    } else {
+                        let _ = sender_tx.send(message::ListenerConnection::ClusterNotFound);
                     }
-                    //FIXME: add nonexistent cluster handler
                 }
-                _ => {}
             }
         }
         panic!("Cluster manager has paniced");

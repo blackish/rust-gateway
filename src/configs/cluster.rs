@@ -14,8 +14,16 @@ pub struct ClusterConfig {
     pub name: Box<str>,
     pub buffer: i64,
     pub lb_method: LbMethod,
+    pub tls: ClusterTlsConfig,
     pub keepalive: Option<Keepalive>,
     pub members: Vec<ClusterMemberConfig>
+}
+
+#[derive(Clone, Debug)]
+pub enum ClusterTlsConfig {
+    None,
+    TransparentSni,
+    Sni(Box<str>)
 }
 
 #[derive(Clone, Debug)]
@@ -80,6 +88,7 @@ impl ClusterConfig {
                     buffer: config[common::BUFFER].as_i64().unwrap_or(DEFAULT_BUFFER),
                     lb_method: lb_method_from_name(&config[cluster::LB_METHOD]),
                     keepalive: keepalive_from_config(&config[cluster::KEEPALIVE]),
+                    tls: tls_from_config(&config[cluster::TLS]),
                     members: Vec::new()
                 };
                 if let Yaml::Array(members_yaml) = &config[cluster::MEMBERS] {
@@ -130,6 +139,21 @@ fn lb_method_from_name(name: &Yaml) -> LbMethod {
         LbMethod::LeastConn
     } else {
         LbMethod::RoundRobin
+    }
+}
+
+fn tls_from_config(name: &Yaml) -> ClusterTlsConfig {
+    match name {
+        Yaml::Hash(tls) => {
+            if let Some(sni) = tls.get(&Yaml::String(cluster::SNI.into())) {
+                ClusterTlsConfig::Sni(sni.as_str().unwrap().into())
+            } else {
+                ClusterTlsConfig::TransparentSni
+            }
+        },
+        _ => {
+            ClusterTlsConfig::None
+        }
     }
 }
 

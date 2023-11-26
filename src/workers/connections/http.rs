@@ -1,12 +1,12 @@
 use log::debug;
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io;
 use std::ops::Deref;
 use tokio::select;
 use tokio::sync::oneshot;
-use tokio::io::{split, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::Sender;
-use bytes::{BytesMut, BufMut};
+use bytes::BytesMut;
 use crate::configs::{listener, config, metric, terms, message, buffer};
 use crate::managers::common::{BUFFER, METRIC, CLUSTER};
 use crate::utils::{http, utils};
@@ -14,7 +14,7 @@ use crate::utils::{http, utils};
 const CONN_BUFFER: usize = 8192;
 const ROUTE_BUFFER: usize = 1_024_000;
 const HTTP_PROTO: &str = "HTTP";
-const HTTP_VERSIONS: [&str; 3] = ["1.0", "1.1", "2"];
+const HTTP_VERSIONS: [&str; 2] = ["1.0", "1.1"];
 
 #[derive(Debug)]
 pub struct HttpConnection {
@@ -141,10 +141,6 @@ pub async fn process_client<T: AsyncReadExt + AsyncWriteExt + Send + Unpin>(
     listener: Box<str>,
     new_sni: Option<Box<str>>
 ) -> io::Result<()> {
-/* pub async fn process_client(
-    connection: config::Connection,
-    config: listener::ListenerHttpProtocolConfig
-) -> io::Result<()> { */
     let result_action: Option<listener::ActionConfig>;
     let result_route: Option<listener::RouteConfig>;
     let mut buffer_size = config.buffer.clone();
@@ -187,26 +183,45 @@ pub async fn process_client<T: AsyncReadExt + AsyncWriteExt + Send + Unpin>(
                                         debug!("Listener: got cluster handle");
                                         let _ = process_client_request(connection, &mut http_connection, buffer, buffer_writer).await?;
                                     },
-                                    _ => {
-                                        fail_and_close(&mut connection).await?;
+                                    message::ListenerConnection::ClusterNotFound => {
+                                        fail_and_close(&mut connection, "404".into(), "Cluster not found".into()).await?;
+                                        http_connection.sent += 50 + 20;
+                                        http_connection.send_metrics().await;
+                                    },
+                                    message::ListenerConnection::NoAvailableMember => {
+                                        fail_and_close(&mut connection, "503".into(), "No available backends".into()).await?;
+                                        http_connection.sent += 50 + 24;
+                                        http_connection.send_metrics().await;
+                                    },
+                                    message::ListenerConnection::BufferOverLimit => {
+                                        fail_and_close(&mut connection, "503".into(), "Out of memory".into()).await?;
+                                        http_connection.sent += 50 + 16;
+                                        http_connection.send_metrics().await;
                                     }
                                 }
 
                             }
                         },
                         message::BufferResponseMessage::OverLimit => {
-                            fail_and_close(&mut connection).await?;
+                            debug!("Got buffer over limit");
+                            fail_and_close(&mut connection, "503".into(), "Out of memory".into()).await?;
+                            http_connection.sent += 50 + 16;
+                            http_connection.send_metrics().await;
                         }
                     }
                 } else {
-                    fail_and_close(&mut connection).await?;
+                    debug!("Got unexpected response from buffer manager");
+                    http_connection.sent += 50 + 16;
+                    fail_and_close(&mut connection, "503".into(), "Out of memory".into()).await?;
                 }
                 return Ok(())
             },
             _ => {}
         }
     } else {
-        fail_and_close(&mut connection).await?;
+        debug!("Route not found");
+        http_connection.sent += 50 + 18;
+        fail_and_close(&mut connection, "404".into(), "Route not found".into()).await?;
     }
     Ok(())
 }
@@ -237,7 +252,6 @@ async fn process_cluster_request<T: AsyncReadExt + AsyncWriteExt + Send + Unpin>
                     if result_len > 0 {
                         http_connection.received += write_buffer.write(&listener_buffer[..result_len]).await?;
                     } else {
-                        // let _ = write_buffer.shutdown().await;
                         let _ = connection.shutdown().await;
                         http_connection.send_metrics().await;
                         return Ok(())
@@ -257,8 +271,6 @@ async fn process_cluster_request<T: AsyncReadExt + AsyncWriteExt + Send + Unpin>
             }
         }
     }
-    // let _ = connection.shutdown().await;
-    // Ok(())
 }
 
 async fn process_client_request<T: AsyncReadExt + AsyncWriteExt + Send + Unpin>(
@@ -309,7 +321,6 @@ async fn process_client_request<T: AsyncReadExt + AsyncWriteExt + Send + Unpin>(
             }
         }
     }
-    Ok(())
 }
 
 fn route(http_connection: &HttpConnection, config: listener::ListenerHttpProtocolConfig) -> (Option<listener::ActionConfig>, Option<listener::RouteConfig>) {
@@ -371,7 +382,6 @@ fn match_route(http_connection: &HttpConnection, config: &listener::RouteConfig)
                     }
                 }
             }
-            _ => {}
         }
     }
     return true;
@@ -479,17 +489,22 @@ async fn read_line<T: AsyncReadExt + AsyncWriteExt + Unpin>(client: &mut T, buf:
 }
 
 //FIXME: add custom err codes and messages
-async fn fail_and_close<T: AsyncReadExt + AsyncWriteExt + Send + Unpin>(http_connection: &mut T) -> io::Result<()> {
+async fn fail_and_close<T: AsyncReadExt + AsyncWriteExt + Send + Unpin>(http_connection: &mut T, err: Box<str>, msg: Box<str>) -> io::Result<()> {
     debug!("Route not found");
     http_connection
-            .write_all(
-                &b"HTTP/1.0 500 ok\r\n\
-            Connection: close\r\n\
-            Content-length: 15\r\n\
-            \r\n\
-            Route not found"[..],
-            )
-            .await?;
+            .write_all(&b"HTTP/1.0 "[..]).await?;
+    http_connection
+            .write_all(err.as_bytes()).await?;
+    http_connection
+            .write_all(&b"\r\n
+            Connection: close\r\n
+            Content-length: "[..]).await?;
+    http_connection
+            .write_all(msg.len().to_string().as_bytes()).await?;
+    http_connection
+            .write_all(&b"\r\n\r\n"[..]).await?;
+    http_connection
+            .write_all(msg.as_bytes()).await?;
     http_connection.shutdown().await?;
     // http_connection.send_metrics().await;
     Ok(())
