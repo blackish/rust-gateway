@@ -8,7 +8,6 @@ use tokio::sync::Mutex;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio_rustls::TlsAcceptor;
-use rustls;
 use crate::configs::{message, listener, config};
 use crate::managers::common::CONFIG;
 use crate::workers::connections::http;
@@ -47,17 +46,13 @@ pub async fn work(new_config: listener::ListenerConfig, new_receiver: Receiver<m
                                 Ok(update) => {
                                     if let message::ConfigUpdate::TlsConfig(new_tls_config) = update {
                                         debug!("Got tls config response");
-                                        *local_tls_acceptor = Some(
-                                            TlsAcceptor::from(
-                                                Arc::new(
-                                                    rustls::ServerConfig::builder()
-                                                        .with_safe_defaults()
-                                                        .with_no_client_auth()
-                                                        .with_single_cert(new_tls_config.certificate_chain, new_tls_config.private_key).unwrap()
+                                        if let Ok(new_server_config) = new_tls_config.get_server_config(){
+                                            *local_tls_acceptor = Some(
+                                                TlsAcceptor::from(
+                                                    Arc::new(new_server_config)
                                                 )
-                                            )
-                                        );
-
+                                            );
+                                        }
                                     }
                                 },
                                 Err(_) => {}
@@ -88,7 +83,6 @@ pub async fn work(new_config: listener::ListenerConfig, new_receiver: Receiver<m
                                             let thread_http_config = http_config.clone();
                                             let conn_sni = Some(sni.into());
                                             tokio::spawn(async move{http::process_client(sock, thread_http_config, current_config.name.clone(), conn_sni).await});
-                                            // tokio::spawn(async move{http::process_client(sock, thread_http_config, current_config.name.clone(), new_sni).await});
                                             break 'protocols;
                                         }
                                     }
@@ -108,7 +102,6 @@ pub async fn work(new_config: listener::ListenerConfig, new_receiver: Receiver<m
                         if let listener::ListenerProtocolConfig::HTTPListener(http_config) = protocol_config {
                             let thread_http_config = http_config.clone();
                             tokio::spawn(async move{http::process_client(sock, thread_http_config, current_config.name.clone(), None).await});
-                            // tokio::spawn(async move{http::process_client(sock, thread_http_config, current_config.name.clone(), None).await});
                             break;
                         }
                     }
@@ -128,16 +121,13 @@ pub async fn work(new_config: listener::ListenerConfig, new_receiver: Receiver<m
                         message::ConfigUpdate::TlsConfig(updated_tlsconfig) => {
                             debug!("Got tls config {:?}", updated_tlsconfig.name);
                             let mut acceptor = tls_acceptor.lock().await;
-                            *acceptor = Some(
-                                TlsAcceptor::from(
-                                    Arc::new(
-                                        rustls::ServerConfig::builder()
-                                            .with_safe_defaults()
-                                            .with_no_client_auth()
-                                            .with_single_cert(updated_tlsconfig.certificate_chain, updated_tlsconfig.private_key).unwrap()
+                            if let Ok(new_server_config) = updated_tlsconfig.get_server_config() {
+                                *acceptor = Some(
+                                    TlsAcceptor::from(
+                                        Arc::new(new_server_config)
                                     )
-                                )
-                            );
+                                );
+                            }
                         },
                         _ => {}
                     }

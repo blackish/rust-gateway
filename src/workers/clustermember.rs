@@ -2,7 +2,7 @@ use log::debug;
 use std::{net::SocketAddr, io};
 use std::sync::Arc;
 use std::collections::HashMap;
-use rustls;
+use tokio_rustls::rustls;
 use tokio_rustls::TlsConnector;
 use tokio::time::{Duration, sleep};
 use tokio::net::TcpStream;
@@ -22,6 +22,7 @@ const TIMEOUT: u8 = 10;
 pub struct Member {
     pub cluster: Box<str>,
     pub socket_address: SocketAddr,
+    pub tls_config: cluster::ClusterTlsConfig,
     pub keepalive: Option<cluster::Keepalive>
 }
 
@@ -29,11 +30,13 @@ impl Member {
     pub fn new(
         new_cluster: Box<str>,
         new_socket_address: SocketAddr,
-        new_keepalive: Option<cluster::Keepalive>
+        new_keepalive: Option<cluster::Keepalive>,
+        tls: cluster::ClusterTlsConfig
     ) -> Self {
         Self {
             cluster: new_cluster,
             socket_address: new_socket_address,
+            tls_config: tls,
             keepalive: new_keepalive.into()
         }
     }
@@ -45,6 +48,34 @@ pub async fn run_member(
     new_config_receiver: Receiver<message::ClusterMessage>,
 ) -> io::Result<()> {
     debug!("Starting cluster {:?} member {:?}", self_member.cluster, self_member.socket_address);
+    let tls_config: Option<rustls::ClientConfig>;
+    match self_member.tls_config {
+        cluster::ClusterTlsConfig::None => {
+            tls_config = None;
+        },
+        cluster::ClusterTlsConfig::Sni(ref _sni) => {
+            tls_config = Some(
+                rustls::ClientConfig::builder()
+                    .with_safe_default_cipher_suites()
+                    .with_safe_default_kx_groups()
+                    .with_safe_default_protocol_versions()
+                    .unwrap()
+                    .with_root_certificates(rustls::RootCertStore::empty())
+                    .with_no_client_auth()
+            )
+        },
+        cluster::ClusterTlsConfig::TransparentSni => {
+            tls_config = Some(
+                rustls::ClientConfig::builder()
+                    .with_safe_default_cipher_suites()
+                    .with_safe_default_kx_groups()
+                    .with_safe_default_protocol_versions()
+                    .unwrap()
+                    .with_root_certificates(rustls::RootCertStore::empty())
+                    .with_no_client_auth()
+            )
+        }
+    }
     let member = Arc::new(RwLock::new(self_member));
     let mut config_receiver = new_config_receiver;
     let mut checker_handle: Option<JoinHandle<Result<(),io::Error>>> = None;

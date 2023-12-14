@@ -139,7 +139,8 @@ async fn add_member(
     let new_member = clustermember::Member::new(
         cluster_config.name.clone(),
         member.address.clone(),
-        cluster_config.keepalive.clone()
+        cluster_config.keepalive.clone(),
+        cluster_config.tls.clone(),
     );
     let (tx, rx) = channel(1);
     let _ = member_list.insert(member.address.to_string().into(), tx);
