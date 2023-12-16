@@ -176,7 +176,24 @@ pub async fn process_client<T: AsyncReadExt + AsyncWriteExt + Send + Unpin>(
                         message::BufferResponseMessage::Buffer((buffer_writer, buffer_reader)) => {
                             debug!("Got buffer response");
                             let (buffer_tx, buffer_rx) = oneshot::channel();
-                            let _ = cluster_manager.send(message::ClusterMessage::ClusterConnection(backend, result_route.unwrap(), buffer_reader, buffer_tx)).await;
+                            let hostname: Box<str>;
+                            if let Some(ref sni) = http_connection.sni {
+                                hostname = sni.clone();
+                            } else if let Some(header_hostname) = http_connection.headers.get(
+                                &config::NoCaseStr::new("host")
+                            ) {
+                                hostname = header_hostname.clone();
+                            } else {
+                                hostname = listener.clone();
+                            }
+                            let _ = cluster_manager.send(
+                                message::ClusterMessage::ClusterConnection(
+                                    backend,
+                                    hostname,
+                                    result_route.unwrap(),
+                                    buffer_reader,
+                                    buffer_tx)
+                            ).await;
                             if let Ok(cluster_message) = buffer_rx.await {
                                 match cluster_message {
                                     message::ListenerConnection::ListenerBuffer(buffer) => {

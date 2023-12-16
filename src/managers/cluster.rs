@@ -55,10 +55,10 @@ impl ClusterManager {
                         let _ = sender.send(update).await;
                     }
                 },
-                message::ClusterMessage::ClusterConnection(cluster, route, buffer, sender_tx) => {
+                message::ClusterMessage::ClusterConnection(cluster, sni, route, buffer, sender_tx) => {
                     if let Some(sender) = self.clusters.get(&cluster) {
                         let _ = sender
-                                .send(message::ClusterMessage::ClusterConnection(cluster, route, buffer, sender_tx))
+                                .send(message::ClusterMessage::ClusterConnection(cluster, sni, route, buffer, sender_tx))
                                 .await;
                     } else {
                         let _ = sender_tx.send(message::ListenerConnection::ClusterNotFound);

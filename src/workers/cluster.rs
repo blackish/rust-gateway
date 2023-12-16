@@ -59,7 +59,7 @@ pub async fn work(
                         _ => {}
                     }
                 },
-                message::ClusterMessage::ClusterConnection(_,_,_,_) => {
+                message::ClusterMessage::ClusterConnection(_,_,_,_,_) => {
                     let mut member_selection: Vec<Box<str>>;
                     let active_member: Option<Sender<message::ClusterMessage>>;
                     debug!("Got client request");

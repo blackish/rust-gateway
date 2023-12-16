@@ -2,6 +2,7 @@ use yaml_rust::Yaml;
 use log::debug;
 use std::net::{SocketAddr, ToSocketAddrs};
 use crate::configs::terms::{common, cluster};
+use crate::configs::tls;
 
 const DEFAULT_BUFFER: i64 = 1048_578;
 const DEFAULT_INTERVAL: i64 = 10;
@@ -22,8 +23,8 @@ pub struct ClusterConfig {
 #[derive(Clone, Debug)]
 pub enum ClusterTlsConfig {
     None,
-    TransparentSni,
-    Sni(Box<str>)
+    TransparentSni(tls::TlsConfig),
+    Sni(Box<str>, tls::TlsConfig)
 }
 
 #[derive(Clone, Debug)]
@@ -86,9 +87,9 @@ impl ClusterConfig {
                 let mut result = Self {
                     name: config[common::NAME].as_str()?.into(),
                     buffer: config[common::BUFFER].as_i64().unwrap_or(DEFAULT_BUFFER),
-                    lb_method: lb_method_from_name(&config[cluster::LB_METHOD]),
-                    keepalive: keepalive_from_config(&config[cluster::KEEPALIVE]),
-                    tls: tls_from_config(&config[cluster::TLS]),
+                    lb_method: LbMethod::new(&config[cluster::LB_METHOD]),
+                    keepalive: Keepalive::new(&config[cluster::KEEPALIVE]),
+                    tls: ClusterTlsConfig::new(&config[cluster::TLS]),
                     members: Vec::new()
                 };
                 if let Yaml::Array(members_yaml) = &config[cluster::MEMBERS] {
@@ -100,7 +101,7 @@ impl ClusterConfig {
                                     result.members.push(
                                         ClusterMemberConfig {
                                             address: saddr.next().unwrap(),
-                                            status: member_status_from_config(&member_yaml[cluster::STATUS])?,
+                                            status: ClusterMemberStatus::new(&member_yaml[cluster::STATUS])?,
                                             weight: member_yaml[cluster::WEIGHT].as_i64().unwrap_or(DEFAULT_WEIGHT)
                                         }
                                     );
@@ -117,97 +118,113 @@ impl ClusterConfig {
     }
 }
 
-fn member_status_from_config(status_yaml: &Yaml) -> Option<ClusterMemberStatus> {
-    if let Some(status_text) = status_yaml.as_str() {
-        match status_text {
-            cluster::ACTIVE => {
-                Some(ClusterMemberStatus::Active(0))
-            },
-            cluster::DISABLED => {
-                Some(ClusterMemberStatus::Disabled)
-            },
-            _ => {debug!("Cluster member status not found"); None}
-        }
-    } else {
-        debug!("Cluster member status not found");
-        None
-    }
-}
-
-fn lb_method_from_name(name: &Yaml) -> LbMethod {
-    if name.as_str().unwrap_or(cluster::ROUND_ROBIN) == cluster::LEAST_CONN {
-        LbMethod::LeastConn
-    } else {
-        LbMethod::RoundRobin
-    }
-}
-
-fn tls_from_config(name: &Yaml) -> ClusterTlsConfig {
-    match name {
-        Yaml::Hash(tls) => {
-            if let Some(sni) = tls.get(&Yaml::String(cluster::SNI.into())) {
-                ClusterTlsConfig::Sni(sni.as_str().unwrap().into())
-            } else {
-                ClusterTlsConfig::TransparentSni
+impl ClusterMemberStatus {
+    fn new(status_yaml: &Yaml) -> Option<Self> {
+        if let Some(status_text) = status_yaml.as_str() {
+            match status_text {
+                cluster::ACTIVE => {
+                    Some(ClusterMemberStatus::Active(0))
+                },
+                cluster::DISABLED => {
+                    Some(ClusterMemberStatus::Disabled)
+                },
+                _ => {debug!("Cluster member status not found"); None}
             }
-        },
-        _ => {
-            ClusterTlsConfig::None
+        } else {
+            debug!("Cluster member status not found");
+            None
         }
     }
 }
 
-fn keepalive_from_config(config: &Yaml) -> Option<Keepalive> {
-    match config {
-        Yaml::Hash(_) => {
-            let mut new_common_config = CommonKeepaliveConfig {
-                interval: DEFAULT_INTERVAL,
-                dead_interval: DEFAULT_DEAD_INTERVAL,
-                live_interval: DEFAULT_LIVE_INTERVAL
-            };
-            if let Yaml::Hash(common_name_yaml) = &config[cluster::COMMON] {
-                if let Yaml::Hash(common_config_yaml) = &common_name_yaml[&Yaml::String(common::CONFIG.into())] {
-                    new_common_config.interval = common_config_yaml[&Yaml::String(cluster::INTERVAL.into())].as_i64().unwrap_or(DEFAULT_INTERVAL);
-                    new_common_config.dead_interval = common_config_yaml[&Yaml::String(cluster::DEAD_INTERVAL.into())].as_i64().unwrap_or(DEFAULT_DEAD_INTERVAL);
-                    new_common_config.live_interval = common_config_yaml[&Yaml::String(cluster::LIVE_INTERVAL.into())].as_i64().unwrap_or(DEFAULT_LIVE_INTERVAL);
+impl LbMethod {
+    fn new(name: &Yaml) -> Self {
+        if name.as_str().unwrap_or(cluster::ROUND_ROBIN) == cluster::LEAST_CONN {
+            LbMethod::LeastConn
+        } else {
+            LbMethod::RoundRobin
+        }
+    }
+}
+
+impl ClusterTlsConfig {
+    fn new(config: &Yaml) -> Self {
+        match config {
+            Yaml::Hash(tls_config) => {
+                if let Some(tls_global_config) = tls_config.get(&Yaml::String(cluster::TLS.into())) {
+                    if let Ok(global_config) = tls::TlsConfig::new(tls_global_config) {
+                        if let Some(sni) = tls_config.get(&Yaml::String(cluster::SNI.into())) {
+                            return ClusterTlsConfig::Sni(sni.as_str().unwrap().into(), global_config)
+                        } else {
+                            return ClusterTlsConfig::TransparentSni(global_config)
+                        }
+                    } else {
+                        return ClusterTlsConfig::None
+                    }
+                } else {
+                    return ClusterTlsConfig::None
+                }
+            },
+            _ => {
+                return ClusterTlsConfig::None
+            }
+        }
+    }
+}
+
+impl Keepalive {
+    fn new(config: &Yaml) -> Option<Self> {
+        match config {
+            Yaml::Hash(_) => {
+                let mut new_common_config = CommonKeepaliveConfig {
+                    interval: DEFAULT_INTERVAL,
+                    dead_interval: DEFAULT_DEAD_INTERVAL,
+                    live_interval: DEFAULT_LIVE_INTERVAL
                 };
-            };
-            if let Yaml::Hash(icmp_name_yaml) = &config[cluster::ICMP] {
-                if let Yaml::Hash(_) = icmp_name_yaml[&Yaml::String(common::CONFIG.into())] {
-                    return Some(
-                        Keepalive::IcmpKeepalive(
-                            IcmpKeepaliveConfig{ common_config: new_common_config }
+                if let Yaml::Hash(common_name_yaml) = &config[cluster::COMMON] {
+                    if let Yaml::Hash(common_config_yaml) = &common_name_yaml[&Yaml::String(common::CONFIG.into())] {
+                        new_common_config.interval = common_config_yaml[&Yaml::String(cluster::INTERVAL.into())].as_i64().unwrap_or(DEFAULT_INTERVAL);
+                        new_common_config.dead_interval = common_config_yaml[&Yaml::String(cluster::DEAD_INTERVAL.into())].as_i64().unwrap_or(DEFAULT_DEAD_INTERVAL);
+                        new_common_config.live_interval = common_config_yaml[&Yaml::String(cluster::LIVE_INTERVAL.into())].as_i64().unwrap_or(DEFAULT_LIVE_INTERVAL);
+                    };
+                };
+                if let Yaml::Hash(icmp_name_yaml) = &config[cluster::ICMP] {
+                    if let Yaml::Hash(_) = icmp_name_yaml[&Yaml::String(common::CONFIG.into())] {
+                        return Some(
+                            Keepalive::IcmpKeepalive(
+                                IcmpKeepaliveConfig{ common_config: new_common_config }
+                            )
+                        );
+                    };
+                } else if let Yaml::Hash(tcp_name_yaml) = &config[cluster::TCP] {
+                    if let Yaml::Hash(_) = tcp_name_yaml[&Yaml::String(common::CONFIG.into())] {
+                        return Some(
+                            Keepalive::TcpKeepalive(
+                                TcpKeepaliveConfig { common_config: new_common_config }   
+                            )
                         )
-                    );
+                    };
+                } else if let Yaml::Hash(http_name_yaml) = &config[cluster::HTTP] {
+                    if let Yaml::Hash(http_config_yaml) = &http_name_yaml[&Yaml::String(common::CONFIG.into())] {
+                        return Some(
+                            Keepalive::HttpKeepalive(
+                                HttpKeepaliveConfig {
+                                    common_config: new_common_config,
+                                    use_tls: http_config_yaml[&Yaml::String(cluster::USE_TLS.into())].as_bool().unwrap_or(false),
+                                    uri: http_config_yaml[&Yaml::String(cluster::URI.into())].as_str()?.into(),
+                                    response_code: http_config_yaml[&Yaml::String(cluster::RESPONSE_CODE.into())].as_i64()?
+                                }
+                            )
+                        );
+                    };
+                } else {
+                    return None;
                 };
-            } else if let Yaml::Hash(tcp_name_yaml) = &config[cluster::TCP] {
-                if let Yaml::Hash(_) = tcp_name_yaml[&Yaml::String(common::CONFIG.into())] {
-                    return Some(
-                        Keepalive::TcpKeepalive(
-                            TcpKeepaliveConfig { common_config: new_common_config }   
-                        )
-                    )
-                };
-            } else if let Yaml::Hash(http_name_yaml) = &config[cluster::HTTP] {
-                if let Yaml::Hash(http_config_yaml) = &http_name_yaml[&Yaml::String(common::CONFIG.into())] {
-                    return Some(
-                        Keepalive::HttpKeepalive(
-                            HttpKeepaliveConfig {
-                                common_config: new_common_config,
-                                use_tls: http_config_yaml[&Yaml::String(cluster::USE_TLS.into())].as_bool().unwrap_or(false),
-                                uri: http_config_yaml[&Yaml::String(cluster::URI.into())].as_str()?.into(),
-                                response_code: http_config_yaml[&Yaml::String(cluster::RESPONSE_CODE.into())].as_i64()?
-                            }
-                        )
-                    );
-                };
-            } else {
-                return None;
-            };
-        },
-        _ => {return None;}
-    };
-    return None;
+            },
+            _ => {return None;}
+        };
+        return None;
+    }
 }
 
 

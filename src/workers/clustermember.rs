@@ -2,8 +2,8 @@ use log::debug;
 use std::{net::SocketAddr, io};
 use std::sync::Arc;
 use std::collections::HashMap;
-use tokio_rustls::rustls;
-use tokio_rustls::TlsConnector;
+use tokio_rustls::{self, rustls};
+use rustls_pki_types;
 use tokio::time::{Duration, sleep};
 use tokio::net::TcpStream;
 use tokio::task::JoinHandle;
@@ -49,31 +49,27 @@ pub async fn run_member(
 ) -> io::Result<()> {
     debug!("Starting cluster {:?} member {:?}", self_member.cluster, self_member.socket_address);
     let tls_config: Option<rustls::ClientConfig>;
+    let mut sni: Option<Box<str>> = None;
     match self_member.tls_config {
         cluster::ClusterTlsConfig::None => {
             tls_config = None;
         },
-        cluster::ClusterTlsConfig::Sni(ref _sni) => {
-            tls_config = Some(
-                rustls::ClientConfig::builder()
-                    .with_safe_default_cipher_suites()
-                    .with_safe_default_kx_groups()
-                    .with_safe_default_protocol_versions()
-                    .unwrap()
-                    .with_root_certificates(rustls::RootCertStore::empty())
-                    .with_no_client_auth()
-            )
+        cluster::ClusterTlsConfig::Sni(ref new_sni, ref global_config) => {
+            if let Ok(global_tls_config) = global_config.clone().get_client_config() {
+                tls_config = Some(global_tls_config);
+                sni = Some(new_sni.clone());
+            } else {
+                debug!("Failed to create client tls config");
+                tls_config = None;
+            }
         },
-        cluster::ClusterTlsConfig::TransparentSni => {
-            tls_config = Some(
-                rustls::ClientConfig::builder()
-                    .with_safe_default_cipher_suites()
-                    .with_safe_default_kx_groups()
-                    .with_safe_default_protocol_versions()
-                    .unwrap()
-                    .with_root_certificates(rustls::RootCertStore::empty())
-                    .with_no_client_auth()
-            )
+        cluster::ClusterTlsConfig::TransparentSni(ref global_config) => {
+            if let Ok(global_tls_config) = global_config.clone().get_client_config() {
+                tls_config = Some(global_tls_config);
+            } else {
+                debug!("Failed to create client tls config");
+                tls_config = None;
+            }
         }
     }
     let member = Arc::new(RwLock::new(self_member));
@@ -112,23 +108,54 @@ pub async fn run_member(
                 },
                 message::ClusterMessage::ClusterConnection(
                     cluster,
+                    client_sni,
                     config,
                     client,
                     client_receiver
                 ) => {
                     let conn = TcpStream::connect(member.read().await.socket_address).await;
                     if let Ok(cluster_conn) = conn {
-                        let member_name = member.read().await.socket_address.to_string().into();
-                        let _ = tokio::spawn(async move {
-                                http::process_cluster(
-                                    cluster_conn,
-                                    config,
-                                    cluster,
-                                    member_name,
-                                    client_receiver,
-                                    client
-                                ).await
-                            }).await;
+                        if let Some(ref tls) = tls_config {
+                            let server_sni: rustls_pki_types::ServerName;
+                            if let Some(ref new_sni) = sni {
+                                server_sni = rustls_pki_types::ServerName::try_from(
+                                        new_sni.clone().into_string()
+                                    ).unwrap();
+                            } else {
+                                server_sni = rustls_pki_types::ServerName::try_from(
+                                        client_sni.into_string()
+                                    ).unwrap();
+                            }
+                            let connector = tokio_rustls::TlsConnector::from(Arc::new(tls.clone()));
+                            if let Ok(tls_conn)  = connector.connect(server_sni, cluster_conn).await {
+                                let member_name = member.read().await.socket_address.to_string().into();
+                                let _ = tokio::spawn(async move {
+                                        http::process_cluster(
+                                            tls_conn,
+                                            config,
+                                            cluster,
+                                            member_name,
+                                            client_receiver,
+                                            client
+                                        ).await
+                                    }).await;
+                            } else {
+                                debug!("Failed to connect to backend");
+                                let _ = client_receiver.send(message::ListenerConnection::NoAvailableMember);
+                            }
+                        } else {
+                            let member_name = member.read().await.socket_address.to_string().into();
+                            let _ = tokio::spawn(async move {
+                                    http::process_cluster(
+                                        cluster_conn,
+                                        config,
+                                        cluster,
+                                        member_name,
+                                        client_receiver,
+                                        client
+                                    ).await
+                                }).await;
+                        }
                     } else {
                         debug!("Failed to connect to backend");
                         let _ = client_receiver.send(message::ListenerConnection::NoAvailableMember);

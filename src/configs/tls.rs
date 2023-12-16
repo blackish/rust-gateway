@@ -32,7 +32,7 @@ pub struct ClientVerifyConfig {
 impl TlsConfig {
     pub fn new(config: &Yaml) -> io::Result<Self> {
         let mut certs: Vec::<u8> = Vec::new();
-        match config[tls::CERT_FILE] {
+        match &config[tls::CERT_FILE] {
             Yaml::String(fln) => {
                 File::open(fln)?.read_to_end(&mut certs)?;
             },
@@ -164,7 +164,6 @@ impl CommonTlsConfig {
         result
     }
     pub fn build_server_config(self) -> Result<rustls::ConfigBuilder<rustls::ServerConfig, rustls::WantsVerifier>,rustls::Error> {
-        let config_builder = rustls::ServerConfig::builder();
         let suites = {
             if self.suites.len() > 0 {
                 self.suites
@@ -213,7 +212,6 @@ impl CommonTlsConfig {
     }
 
     pub fn build_client_config(self) -> Result<rustls::ConfigBuilder<rustls::ClientConfig, rustls::client::WantsClientCert>,rustls::Error> {
-        let config_builder = rustls::ClientConfig::builder();
         let suites = {
             if self.suites.len() > 0 {
                 self.suites
@@ -250,7 +248,7 @@ impl CommonTlsConfig {
                 rustls::DEFAULT_VERSIONS.to_vec()
             }
         };
-        let roots = RootCertStore::empty();
+        let mut roots = RootCertStore::empty();
         roots.extend(
             webpki_roots::TLS_SERVER_ROOTS
                 .iter()
@@ -291,8 +289,8 @@ impl ClientVerifyConfig {
         if self.root_certificates.len() == 0 {
             return Ok(config_builder.with_client_cert_verifier(rustls::server::WebPkiClientVerifier::no_client_auth()));
         }
-        let ca_certs = rustls::RootCertStore::empty();
-        rustls_pemfile::certs(
+        let mut ca_certs = rustls::RootCertStore::empty();
+        let _ = rustls_pemfile::certs(
             &mut BufReader::new(&self.root_certificates[..])
             )
             .map(|result| ca_certs.add(result.unwrap()));

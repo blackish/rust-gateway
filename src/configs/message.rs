@@ -29,6 +29,7 @@ pub enum ClusterMessage {
     ConfigUpdate(ConfigUpdate),
     ClusterConnection(
         Box<str>,
+        Box<str>,
         listener::RouteConfig,
         StrictBufferReader,
         Sender<ListenerConnection>

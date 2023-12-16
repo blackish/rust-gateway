@@ -57,6 +57,7 @@ clusters:
 - name: default
   buffer: 1000000
   lb_method: ROUNDROBIN
+  tls: {}
   keepalive:
     common:
       config:
@@ -66,7 +67,7 @@ clusters:
     tcp:
       config: {}
   members:
-  - socket_address: 31.177.80.70:80
+  - socket_address: 92.223.65.188:443
     status: active
     weight: 1
 
