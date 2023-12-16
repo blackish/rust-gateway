@@ -151,6 +151,7 @@ impl ClusterTlsConfig {
     fn new(config: &Yaml) -> Self {
         match config {
             Yaml::Hash(tls_config) => {
+                debug!("Reading cluster TLS config");
                 if let Some(tls_global_config) = tls_config.get(&Yaml::String(cluster::TLS.into())) {
                     if let Ok(global_config) = tls::TlsConfig::new(tls_global_config) {
                         if let Some(sni) = tls_config.get(&Yaml::String(cluster::SNI.into())) {

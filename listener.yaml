@@ -35,17 +35,18 @@ listeners:
   - name: default
     engine: http
     sni:
-    - .*ample.com
+    - .*xyz
     virtual_hosts:
     - name: host1
       host_names:
-      - .*ample.com:.*
+      - .*xyz:.*
+      - .*xyz
       routes:
       - name: default
         path_matches:
         - name: default
           path_prefix:
-          - "/start"
+          - "/login"
         # - name: headers
         #   header:
         #     -
@@ -57,7 +58,9 @@ clusters:
 - name: default
   buffer: 1000000
   lb_method: ROUNDROBIN
-  tls: {}
+  tls:
+    tls:
+      name: backend
   keepalive:
     common:
       config:

@@ -378,6 +378,7 @@ fn match_route(http_connection: &HttpConnection, config: &listener::RouteConfig)
                         continue 'route;
                     }
                 }
+                return false;
             },
             listener::PathMatchActionConfig::PathRegex(prefix) => {
                 for single_prefix in prefix {
@@ -385,6 +386,7 @@ fn match_route(http_connection: &HttpConnection, config: &listener::RouteConfig)
                         continue 'route;
                     }
                 }
+                return false;
             },
             listener::PathMatchActionConfig::HeaderMatch(headers) => {
                 for kv in headers {

@@ -116,6 +116,7 @@ pub async fn run_member(
                     let conn = TcpStream::connect(member.read().await.socket_address).await;
                     if let Ok(cluster_conn) = conn {
                         if let Some(ref tls) = tls_config {
+                            debug!("Starting TLS for backend");
                             let server_sni: rustls_pki_types::ServerName;
                             if let Some(ref new_sni) = sni {
                                 server_sni = rustls_pki_types::ServerName::try_from(
@@ -127,6 +128,7 @@ pub async fn run_member(
                                     ).unwrap();
                             }
                             let connector = tokio_rustls::TlsConnector::from(Arc::new(tls.clone()));
+                            debug!("Backend SNI: {:?}", server_sni);
                             if let Ok(tls_conn)  = connector.connect(server_sni, cluster_conn).await {
                                 let member_name = member.read().await.socket_address.to_string().into();
                                 let _ = tokio::spawn(async move {
