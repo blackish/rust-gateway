@@ -191,7 +191,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
+    fn test_uri_normalize() {
         assert_eq!(normalized(String::from("/test/../../test1/./tеst2?test1=1&test2=2&test3#ref")), String::from("/test1/t%D0%B5st2?test1=1&test2=2&test3#ref"));
     }
 }

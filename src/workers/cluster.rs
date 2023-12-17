@@ -56,6 +56,13 @@ pub async fn work(
                                 }
                             }
                         },
+                        message::ConfigUpdate::TlsConfig(new_tls_config) => {
+                            for member in members.values() {
+                                let _ = member.send(message::ClusterMessage::ConfigUpdate(
+                                    message::ConfigUpdate::TlsConfig(new_tls_config.clone())
+                                ));
+                            }
+                        }
                         _ => {}
                     }
                 },

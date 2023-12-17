@@ -131,7 +131,7 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn it_works() {
+    async fn test_ring_buffer() {
         println!("Spawning tasks");
         let (writer, reader) = StrictBuffer::new(1024);
         let (tx1, rx1) = oneshot::channel();

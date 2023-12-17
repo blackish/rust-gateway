@@ -47,3 +47,14 @@ impl NoCaseStr {
         &self.value
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn no_case_test() {
+        let str1 = NoCaseStr::new("TEST");
+        let str2 = NoCaseStr::new("test");
+        assert_eq!(str1, str2);
+    }
+}

@@ -2,7 +2,6 @@ use yaml_rust::Yaml;
 use log::debug;
 use std::net::{SocketAddr, ToSocketAddrs};
 use crate::configs::terms::{common, cluster};
-use crate::configs::tls;
 
 const DEFAULT_BUFFER: i64 = 1048_578;
 const DEFAULT_INTERVAL: i64 = 10;
@@ -23,8 +22,8 @@ pub struct ClusterConfig {
 #[derive(Clone, Debug)]
 pub enum ClusterTlsConfig {
     None,
-    TransparentSni(tls::TlsConfig),
-    Sni(Box<str>, tls::TlsConfig)
+    TransparentSni(Box<str>),
+    Sni(Box<str>, Box<str>)
 }
 
 #[derive(Clone, Debug)]
@@ -152,12 +151,12 @@ impl ClusterTlsConfig {
         match config {
             Yaml::Hash(tls_config) => {
                 debug!("Reading cluster TLS config");
-                if let Some(tls_global_config) = tls_config.get(&Yaml::String(cluster::TLS.into())) {
-                    if let Ok(global_config) = tls::TlsConfig::new(tls_global_config) {
+                if let Some(tls_name) = tls_config.get(&Yaml::String(common::NAME.into())) {
+                    if let Yaml::String(tls_name_string) = tls_name {
                         if let Some(sni) = tls_config.get(&Yaml::String(cluster::SNI.into())) {
-                            return ClusterTlsConfig::Sni(sni.as_str().unwrap().into(), global_config)
+                            return ClusterTlsConfig::Sni(sni.as_str().unwrap().into(), tls_name_string.as_str().into())
                         } else {
-                            return ClusterTlsConfig::TransparentSni(global_config)
+                            return ClusterTlsConfig::TransparentSni(tls_name_string.as_str().into())
                         }
                     } else {
                         return ClusterTlsConfig::None

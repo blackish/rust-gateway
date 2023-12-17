@@ -59,8 +59,7 @@ clusters:
   buffer: 1000000
   lb_method: ROUNDROBIN
   tls:
-    tls:
-      name: backend
+    name: backend
   keepalive:
     common:
       config:
@@ -77,3 +76,19 @@ clusters:
 tls:
   - name: testcert
     file: ./test.pem
+    common_config:
+      protocols:
+      - tlsv1_2
+      kxs:
+      - secp256r1
+      ciphers:
+      - tls_ecdhe_ecdsa_with_aes_256_gcm_sha384
+      - tls_ecdhe_ecdsa_with_aes_128_gcm_sha256
+    client_verify_config:
+      ca: ./test.pem
+      crl: ./test.pem
+  - name: backend
+    common_config:
+      protocols:
+      - tlsv1_2
+    # file: ./test.pem

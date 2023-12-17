@@ -1,4 +1,5 @@
 use log::debug;
+use tokio::sync::oneshot;
 use std::{net::SocketAddr, io};
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -15,6 +16,7 @@ use rand::random;
 use crate::configs::{message, cluster, terms, metric};
 use crate::managers::common;
 use crate::workers::connections::http;
+use crate::managers::common::CONFIG;
 
 const TIMEOUT: u8 = 10;
 
@@ -48,28 +50,84 @@ pub async fn run_member(
     new_config_receiver: Receiver<message::ClusterMessage>,
 ) -> io::Result<()> {
     debug!("Starting cluster {:?} member {:?}", self_member.cluster, self_member.socket_address);
-    let tls_config: Option<rustls::ClientConfig>;
+    let config_requester = (CONFIG.read().await.as_ref().unwrap()).clone();
+    let mut tls_config: Option<rustls::ClientConfig> = None;
     let mut sni: Option<Box<str>> = None;
     match self_member.tls_config {
         cluster::ClusterTlsConfig::None => {
+            debug!("No tls in use");
             tls_config = None;
         },
         cluster::ClusterTlsConfig::Sni(ref new_sni, ref global_config) => {
-            if let Ok(global_tls_config) = global_config.clone().get_client_config() {
-                tls_config = Some(global_tls_config);
-                sni = Some(new_sni.clone());
-            } else {
-                debug!("Failed to create client tls config");
-                tls_config = None;
-            }
+            let (request_tx, request_rx) = oneshot::channel();
+            debug!("Sendng request for TLS config {:?}", global_config);
+            let send_result = config_requester.send(
+                message::ConfigRequest {
+                    requester: request_tx,
+                    request_type: message::ConfigRequestType::TlsConfig(global_config.clone())
+                }
+            ).await;
+            match send_result {
+                Ok(()) => {
+                    debug!("Request sent");
+                    let config_update = request_rx.await;
+                    match config_update {
+                        Ok(update) => {
+                            if let message::ConfigUpdate::TlsConfig(new_tls_config) = update {
+                                debug!("Got tls config response");
+                                if let Ok(new_client_config) = new_tls_config.get_client_config(){
+                                    debug!("Built tls client config");
+                                    tls_config = Some(new_client_config);
+                                    sni = Some(new_sni.clone());
+                                }
+                            }
+                        },
+                        Err(_) => {
+                            debug!("Failed to get tls config");
+                            tls_config = None;
+                        }
+                    };
+                },
+                Err(_) => {
+                    debug!("Failed to send tls request");
+                    tls_config = None;
+                }
+            };
         },
         cluster::ClusterTlsConfig::TransparentSni(ref global_config) => {
-            if let Ok(global_tls_config) = global_config.clone().get_client_config() {
-                tls_config = Some(global_tls_config);
-            } else {
-                debug!("Failed to create client tls config");
-                tls_config = None;
-            }
+            let (request_tx, request_rx) = oneshot::channel();
+            debug!("Sendng request for TLS config {:?}", global_config);
+            let send_result = config_requester.send(
+                message::ConfigRequest {
+                    requester: request_tx,
+                    request_type: message::ConfigRequestType::TlsConfig(global_config.clone())
+                }
+            ).await;
+            match send_result {
+                Ok(()) => {
+                    debug!("Request sent");
+                    let config_update = request_rx.await;
+                    match config_update {
+                        Ok(update) => {
+                            if let message::ConfigUpdate::TlsConfig(new_tls_config) = update {
+                                debug!("Got tls config response");
+                                if let Ok(new_client_config) = new_tls_config.get_client_config(){
+                                    debug!("Built tls client config");
+                                    tls_config = Some(new_client_config);
+                                }
+                            }
+                        },
+                        Err(_) => {
+                            debug!("Failed to get tls config");
+                            tls_config = None;
+                        }
+                    };
+                },
+                Err(_) => {
+                    debug!("Failed to send tls request");
+                    tls_config = None;
+                }
+            };
         }
     }
     let member = Arc::new(RwLock::new(self_member));
@@ -102,6 +160,26 @@ pub async fn run_member(
                                 let _ = checker_handle.unwrap().await;
                             }
                             return Ok(())
+                        },
+                        message::ConfigUpdate::TlsConfig(new_tls_config) => {
+                            let local_member = member.read().await;
+                            match local_member.tls_config {
+                                cluster::ClusterTlsConfig::Sni(_, ref conf_name) => {
+                                    if *conf_name == new_tls_config.name {
+                                        if let Ok(new_client_tls_config) = new_tls_config.get_client_config() {
+                                            tls_config = Some(new_client_tls_config);
+                                        }
+                                    }
+                                },
+                                cluster::ClusterTlsConfig::TransparentSni(ref conf_name) => {
+                                    if *conf_name == new_tls_config.name {
+                                        if let Ok(new_client_tls_config) = new_tls_config.get_client_config() {
+                                            tls_config = Some(new_client_tls_config);
+                                        }
+                                    }
+                                },
+                                _ => {}
+                            }
                         }
                         _ => {}
                     }

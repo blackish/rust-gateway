@@ -47,6 +47,13 @@ impl ClusterManager {
                                 ).await;
                             }
                         },
+                        message::ConfigUpdate::TlsConfig(new_tls_config) => {
+                            for member in self.clusters.values() {
+                                let _ = member.send(message::ClusterMessage::ConfigUpdate(
+                                    message::ConfigUpdate::TlsConfig(new_tls_config.clone())
+                                ));
+                            }
+                        }
                         _ => {}
                     }
                 },

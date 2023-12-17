@@ -55,7 +55,7 @@ impl TlsConfig {
         certs = rustls_pemfile::certs(
             &mut BufReader::new(&self.certificate_chain[..])
             )
-            .map(|result| result.unwrap())
+            .map(|result| {debug!("{:?}", result); result.unwrap()})
             .collect();
 
         if let Ok(Some(key)) = rustls_pemfile::private_key(
@@ -65,10 +65,11 @@ impl TlsConfig {
         } else {
             return Err(rustls::Error::General("Failed to read key".into()))
         }
-        self.common_config
+        self.client_verify.build_server_config(
+            self.common_config
             .build_server_config()?
-            .with_no_client_auth()
-            .with_single_cert_with_ocsp(certs, private_key, Vec::new())
+        )?
+        .with_single_cert_with_ocsp(certs, private_key, Vec::new())
     }
 
     pub fn get_client_config(self) -> Result<rustls::ClientConfig, rustls::Error> {
@@ -102,30 +103,36 @@ impl TlsConfig {
 
 pub fn get_suite(name: &str) -> Option<rustls::SupportedCipherSuite> {
     let lower_name = name.to_string().to_lowercase();
+    debug!("Current suites {:?}", lower_name);
     rustls::crypto::ring::ALL_CIPHER_SUITES
         .iter()
         .copied()
         .find(|x| {
+            debug!("All ciphers {:?}", x.suite().as_str().unwrap().to_lowercase());
             x.suite().as_str().unwrap().to_lowercase() == lower_name
         })
 }
 
 pub fn get_protocol(name: &str) -> Option<&'static rustls::SupportedProtocolVersion> {
     let lower_name = name.to_string().to_lowercase();
+    debug!("Current protocol {:?}", lower_name);
     rustls::ALL_VERSIONS
         .iter()
         .copied()
         .find(|x| {
+            debug!("All protocols {:?}", x.version.as_str().unwrap().to_lowercase());
             x.version.as_str().unwrap().to_lowercase() == lower_name
         })
 }
 
 pub fn get_kx(name: &str) -> Option<&'static dyn rustls::crypto::SupportedKxGroup> {
     let lower_name = name.to_string().to_lowercase();
+    debug!("Current KXs {:?}", lower_name);
     rustls::crypto::ring::ALL_KX_GROUPS
         .iter()
         .copied()
         .find(|x| {
+            debug!("All KXs {:?}", x.name().as_str().unwrap().to_lowercase());
             x.name().as_str().unwrap().to_lowercase() == lower_name
         })
 }
@@ -168,8 +175,8 @@ impl CommonTlsConfig {
             if self.suites.len() > 0 {
                 self.suites
                     .iter()
-                    .map(|suite| {
-                        get_suite(suite).unwrap()
+                    .filter_map(|suite| {
+                        get_suite(suite)
                     })
                     .collect::<Vec<rustls::SupportedCipherSuite>>()
             } else {
@@ -180,8 +187,8 @@ impl CommonTlsConfig {
             if self.kx.len() > 0 {
                 self.kx
                 .iter()
-                .map(|kx| {
-                        get_kx(kx).unwrap()
+                .filter_map(|kx| {
+                        get_kx(kx)
                     })
                 .collect::<Vec<&dyn rustls::crypto::SupportedKxGroup>>()
             } else {
@@ -271,6 +278,7 @@ impl CommonTlsConfig {
 
 impl ClientVerifyConfig {
     pub fn new(config: &Yaml) -> io::Result<Self> {
+        debug!("Building client verify tls config");
         let mut result = Self {
             root_certificates: Vec::new(),
             crls: Vec::new()
@@ -282,29 +290,42 @@ impl ClientVerifyConfig {
             },
             _ => {}
         }
+        debug!("Building client verify tls config completed");
         Ok(result)
     }
-    // pub fn build_server_config(self) -> Result<rustls::ConfigBuilder<rustls::ServerConfig, rustls::WantsVerifier>,rustls::Error> {
     pub fn build_server_config(self, config_builder: rustls::ConfigBuilder<rustls::ServerConfig, rustls::WantsVerifier>) -> Result<rustls::ConfigBuilder<rustls::ServerConfig, rustls::server::WantsServerCert>, rustls::Error> {
+        debug!("Building client verifier");
         if self.root_certificates.len() == 0 {
             return Ok(config_builder.with_client_cert_verifier(rustls::server::WebPkiClientVerifier::no_client_auth()));
         }
         let mut ca_certs = rustls::RootCertStore::empty();
-        let _ = rustls_pemfile::certs(
+        debug!("Building client verifier CA certs");
+        for cert in rustls_pemfile::certs(
             &mut BufReader::new(&self.root_certificates[..])
             )
-            .map(|result| ca_certs.add(result.unwrap()));
+            .map(|result| result.unwrap()) {
+                let _ = ca_certs.add(cert);
+            }
+        debug!("Building client verifier CA finished {:?}", ca_certs);
+        debug!("Building client verifier CRLs");
         let crls: Vec<rustls_pki_types::CertificateRevocationListDer<'_>> = rustls_pemfile::crls(
             &mut BufReader::new(&self.crls[..])
             )
-            .map(|result| result.unwrap())
+            .filter_map(|result| {
+                if let Ok(result_crl) = result {
+                    Some(result_crl)
+                } else {
+                    None
+                }
+            })
             .collect();
+        debug!("Building client verifier CRLs finished {:?}", crls);
         if let Ok(verifier) = rustls::server::WebPkiClientVerifier::builder(ca_certs.into()).with_crls(crls).build() {
+            debug!("Building client verifier successfull");
             return Ok(config_builder.with_client_cert_verifier(verifier))
         } else {
+            debug!("Failed to build verifier");
             return Err(rustls::Error::NoCertificatesPresented);
         }
-
-
     }
 }
