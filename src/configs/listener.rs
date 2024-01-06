@@ -8,10 +8,6 @@ use crate::configs::terms::{common, listener};
 // buffer
 const DEFAULT_BUFFER: i64 = 1_048_578;
 
-pub struct Listener {
-    pub name: Box<str>
-}
-
 #[derive(Clone, Debug)]
 pub struct ListenerConfig {
     pub name: Box<str>,
@@ -62,7 +58,6 @@ pub enum PathMatchActionConfig {
     Method(Vec<config::NoCaseStr>),
     HeaderMatch(Vec<config::KV>)
 }
-
 
 #[derive(Clone, Debug)]
 pub enum ActionConfig {
